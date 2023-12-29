@@ -1,6 +1,7 @@
 import json
 import argparse
 import os
+from multiprocessing import Pool
 
 # Argument parser setup
 parser = argparse.ArgumentParser()
@@ -8,6 +9,14 @@ parser.add_argument('--output', type=str, required=True, help='Output folder for
 parser.add_argument('--filename', type=str, required=True, help='Name of the BloodHound JSON file')
 parser.add_argument('--chunks', type=int, default=100, help='Number of chunks to split the BloodHound JSON file into')
 args = parser.parse_args()
+
+def process_chunk(chunk_data):
+    output, idx, chunk, meta = chunk_data
+    new_file = {
+        "data": chunk,
+        "meta": meta
+    }
+    write_json(new_file, os.path.join(output, f'chunk_{idx}.json'))
 
 def main(args):
     # Ensure output folder exists
@@ -18,17 +27,17 @@ def main(args):
 
     # Prepare meta data
     count, data_type, version = data['meta']['count'], data['meta']['type'], data['meta']['version']
+    meta = {"type": data_type, "version": version, "count": 0}
 
     # Generate chunks
     chunks = json_chunks(data, args.chunks)
 
-    # Write each chunk to a file
-    for idx, chunk in enumerate(chunks):
-        new_file = {
-            "data": chunk,
-            "meta": {"type": data_type, "version": version, "count": len(chunk)}
-        }
-        write_json(new_file, os.path.join(args.output, f'chunk_{idx}.json'))
+    # Prepare data for multiprocessing
+    chunk_data_for_processing = [(args.output, idx, chunk, {**meta, "count": len(chunk)}) for idx, chunk in enumerate(chunks)]
+
+    # Use multiprocessing to process chunks
+    with Pool() as pool:
+        pool.map(process_chunk, chunk_data_for_processing)
 
 def write_json(data, filename):
     try:
