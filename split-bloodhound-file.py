@@ -7,7 +7,6 @@ from multiprocessing import Pool
 parser = argparse.ArgumentParser()
 parser.add_argument('--output', type=str, required=True, help='Output folder for chunked JSON files')
 parser.add_argument('--filename', type=str, required=True, help='Name of the BloodHound JSON file')
-parser.add_argument('--chunks', type=int, default=100, help='Number of chunks to split the BloodHound JSON file into')
 args = parser.parse_args()
 
 def process_chunk(chunk_data):
@@ -26,11 +25,13 @@ def main(args):
     data = import_json(args.filename)
 
     # Prepare meta data
-    count, data_type, version = data['meta']['count'], data['meta']['type'], data['meta']['version']
-    meta = {"type": data_type, "version": version, "count": 0}
+    meta = {"type": data['meta']['type'], "version": data['meta']['version'], "count": 0}
+
+    # Estimate chunk size (1GB)
+    target_chunk_size_in_bytes = 1 * 1024 * 1024 * 1024  # 1GB in bytes
 
     # Generate chunks
-    chunks = json_chunks(data, args.chunks)
+    chunks = json_chunks(data, target_chunk_size_in_bytes)
 
     # Prepare data for multiprocessing
     chunk_data_for_processing = [(args.output, idx, chunk, {**meta, "count": len(chunk)}) for idx, chunk in enumerate(chunks)]
@@ -54,9 +55,24 @@ def import_json(filename):
         print(f"Error reading file {filename}: {e}")
         return None
 
-def json_chunks(data, chunks):
-    chunk_size = max(1, len(data['data']) // chunks)
-    return [data['data'][i:i + chunk_size] for i in range(0, len(data['data']), chunk_size)]
+def json_chunks(data, target_chunk_size_in_bytes):
+    current_chunk = []
+    current_chunk_size = 0
+    chunks = []
+
+    for item in data['data']:
+        item_size = len(json.dumps(item))  # Estimate size of the item
+        if current_chunk_size + item_size > target_chunk_size_in_bytes and current_chunk:
+            chunks.append(current_chunk)
+            current_chunk = []
+            current_chunk_size = 0
+        current_chunk.append(item)
+        current_chunk_size += item_size
+
+    if current_chunk:  # Add the last chunk if it has data
+        chunks.append(current_chunk)
+
+    return chunks
 
 if __name__ == '__main__':
     main(args)
